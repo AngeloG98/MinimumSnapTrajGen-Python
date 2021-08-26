@@ -3,13 +3,6 @@ import time
 import numpy as np
 import cv2
 import multiprocessing
-from trajfollow_ctrl import traj_follow_ctrl
-
-def log_data(des, state):
-    des_n = np.array(des)
-    state_n = np.array(state)
-    np.save("./data_log/des.npy",des_n)
-    np.save("./data_log/state.npy",state_n)
 
 def objectDetect(circle_xyr):
     """detect objects, return ex, ey"""
@@ -33,7 +26,7 @@ def objectDetect(circle_xyr):
 def circleDetect(img_th):
     """Hough Circle detect"""
     circles = cv2.HoughCircles(img_th, cv2.HOUGH_GRADIENT, 2, 
-                                    30, param1=None, param2=40, minRadius=15, maxRadius=0)
+                                    30, param1=None, param2=40, minRadius=15, maxRadius=150)
     if circles is not None:
         circles = np.uint16(np.around(circles))
         obj = circles[0, 0]
@@ -54,7 +47,6 @@ class airsim_client:
         self.client = airsim.MultirotorClient(ip_addr)
         self.client.confirmConnection()
         self.client.enableApiControl(True)
-        self.traj = traj_follow_ctrl(self.client)
 
         self.new_task = True
         self.th_loss = 20
@@ -65,12 +57,14 @@ class airsim_client:
 
         self.k_position = 1.0
         self.k_yaw = 0.5
-        self.v_position = 3
-        self.v_through = 3
-        self.k_ibvs_hor = 0.022
-        self.k_ibvs_ver = 0.022
-
+        self.cx = 160
+        self.cy = 120
         self.f = 120
+        self.v_position = 5
+        self.v_through = 3
+        self.k_ibvs_hor = 0.025
+        self.k_ibvs_ver = 0.025
+
         self.n_cc = np.array([0,0,1])
         self.R_cb = np.array([[0,0,1],\
                              [1,0,0],\
@@ -81,12 +75,10 @@ class airsim_client:
                           [19.8, -65.4, -3.7, np.deg2rad(-110)], [ 8.0, -82.2, -2.5, np.deg2rad(-120)],
                           [-11.3,-93.0, -2.9, np.deg2rad(-170)], [-29.9,-98.6, -4.7, np.deg2rad(-180)],
                           [-52.1,-103.0,-5.7, np.deg2rad(-180)]]
-
         self.setpoint_land = [-62.9, -102.3, -2]
 
         self.circle_xyr = multiprocessing.Manager().list([-1, -1, -1])
         self.p = multiprocessing.Process(target=objectDetect, args=(self.circle_xyr, ))
-        self.state_log = []
         self.p.start()
 
     def __del__(self):
@@ -190,7 +182,7 @@ class airsim_client:
         # case1: (0.02, 3, 10)
         # case2: (0.04, 3, 12)
         v_m[0] = 5
-        v_m[1] = 6.2*v_b[1]
+        v_m[1] = 6*v_b[1]
         v_m[2] = 7*v_b[2]
 
         v = self.saturation(v_m, 8)
@@ -219,31 +211,29 @@ class airsim_client:
     def task_takeoff(self):
         self.client.armDisarm(True)
         self.client.takeoffAsync()#.join()
-        time.sleep(0.1)
+        time.sleep(0.5)
 
     def task_cross_circle(self, circle_id):
         cnt_loss = 0
         cnt_through = 0
         last_R = 0
-        self.traj.reset()
         while True:
-            print("R: {}".format(self.circle_xyr[2]))
+            # print("R: {}".format(self.circle_xyr[2]))
             # 大于一定距离先靠近
             state = self.client.getMultirotorState()
+            # vel = state.kinematics_estimated.linear_velocity
+            # print(np.linalg.norm([vel.x_val, vel.y_val, vel.z_val]))
             position = state.kinematics_estimated.position
             p = np.array([position.x_val, position.y_val, position.z_val])
             dis = np.linalg.norm(np.array(self.setpoints[circle_id][:3]) - p)
-            self.state_log.append(p)
-            # print(p)
             # print(dis)
             # 新任务按照预设点飞行
             if self.new_task:
-                self.traj.moveByMinSnapAsync(circle_id)
-                time.sleep(0.01)
-            log_data(self.traj.des_log,self.state_log)
+                self.moveToPositionOnceAsync(*self.setpoints[circle_id], self.v_position)
+                time.sleep(0.02)
 
-            # # circle_xyr = self.objectDetect()
-            # # print(circle_xyr)
+            # circle_xyr = self.objectDetect()
+            # print(circle_xyr)
             # 半径大于阈值就直接飞，防止太近误检测
             if self.circle_xyr[2] > self.th_R_max and self.circle_xyr[2] > last_R:
                 cnt_through = 0
@@ -258,13 +248,13 @@ class airsim_client:
                     self.new_task = True
                     break
                 continue
-            # # 如果找到了目标，按照视觉饲服飞行
+            # 如果找到了目标，按照视觉饲服飞行
             if self.circle_xyr[2] > 0 and self.circle_xyr[2] > self.th_R_min:
                 self.new_task = False
                 cnt_loss = 0
                 # self.moveByVisualServoOnceAsync(*self.circle_xyr)
                 self.moveByRotateVisualServoOnceAsync(*self.circle_xyr)
-                time.sleep(0.01)
+                time.sleep(0.02)
                 # print(circle_xyr)
             # 如果没找到目标，但是曾经找到过，而且丢失次数小于阈值，按照上次指令飞
             elif self.circle_xyr[2] <= 0 and cnt_loss < self.th_loss and self.new_task == False:
@@ -279,8 +269,8 @@ class airsim_client:
                 break
             else:
                 pass
-            #     # print("pass")
-            
+                # print("pass")
+
     
     def task_land(self):
         self.moveToPosition(*self.setpoint_land, None, 10)
@@ -290,6 +280,7 @@ class airsim_client:
         # airsim.wait_key('Press any key to takeoff.')
         print("=========================")
         print("Taking off...")
+        start_time = time.time()
         self.task_takeoff()
 
         for circle_id in range(len(self.setpoints)):
@@ -304,10 +295,8 @@ class airsim_client:
 
         print("=========================")
         print("Task is finished.")
+        print("Time: {}".format(time.time() - start_time))
 
 if __name__ == "__main__":
-    start_time = time.time()
     client = airsim_client('127.0.0.1')
     client.begin_task()
-    end_time = time.time()
-    print(end_time - start_time)
