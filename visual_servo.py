@@ -3,7 +3,7 @@ import time
 import numpy as np
 import cv2
 import multiprocessing
-from trajfollowctrl_py import traj_follow_ctrl
+from trajfollow_ctrl import traj_follow_ctrl
 
 def objectDetect(circle_xyr):
     """detect objects, return ex, ey"""
