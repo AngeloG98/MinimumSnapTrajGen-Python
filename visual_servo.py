@@ -308,6 +308,7 @@ class airsim_client:
         print("Task is finished.")
 
 if __name__ == "__main__":
+    #git
     start_time = time.time()
     client = airsim_client('127.0.0.1')
     client.begin_task()
