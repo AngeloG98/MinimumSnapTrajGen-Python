@@ -190,10 +190,10 @@ class airsim_client:
         # case1: (0.02, 3, 10)
         # case2: (0.04, 3, 12)
         v_m[0] = 5
-        v_m[1] = 6.2*v_b[1]
+        v_m[1] = 6.5*v_b[1]
         v_m[2] = 7*v_b[2]
 
-        v = self.saturation(v_m, 8)
+        v = self.saturation(v_m, 10)
         yaw_rate = 0.002*(ex_i)
         
         # print("v_b: {}\nv_m: {}\nv: {}".format(v_b, v_m, v))
@@ -227,10 +227,12 @@ class airsim_client:
         last_R = 0
         self.traj.reset()
         while True:
-            print("R: {}".format(self.circle_xyr[2]))
+            # print("R: {}".format(self.circle_xyr[2]))
             # 大于一定距离先靠近
             state = self.client.getMultirotorState()
             position = state.kinematics_estimated.position
+            vel = state.kinematics_estimated.linear_velocity
+            print(np.linalg.norm([vel.x_val, vel.y_val, vel.z_val]))
             p = np.array([position.x_val, position.y_val, position.z_val])
             dis = np.linalg.norm(np.array(self.setpoints[circle_id][:3]) - p)
             self.state_log.append(p)
