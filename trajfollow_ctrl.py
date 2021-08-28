@@ -1,5 +1,6 @@
 import time
 import airsim
+from airsim.types import KinematicsState
 import numpy as np
 import scipy.io as scio
 from airsim.utils import wait_key
@@ -18,7 +19,7 @@ class traj_follow_ctrl:
         # Control Parameters
         self.kp = [2, 2 ,3, 2]# in order x, y, z, yaw
         self.ki =  [0, 0, 0.1, 0]
-        self.kd = [0, 0, 0.8, 0]
+        self.kd = [0, 0, 1, 0]
         self.sampletime = 0.01
         self.des_log = []
         # self.matrix_x = np.array([[0,-55.105701385464954,12.945774603093204,588.87087005129706,-3851.5064082979861,10986.541327370745,-28147.710205135085,4708.6455000657625],[0,38.263433183038273,1.2147075991010898,-222.78885312153673,1149.689655380057,-2880.1323826417038,7023.7409148539946,-13603.927183202719],[0,-8.5154247035497317,-0.44737336356082247,34.410383238278854,-135.04730128001074,296.39551933098232,-665.89336942649038,1833.0645945989506],[0.66497669651840918,0.99940150064750455,0.12091798338131673,-2.5918361602085067,7.8559381429163384,-14.969258784333704,30.453692708745027,-94.380839325880345],[-0.16292454854413715,-0.058427708118262665,-0.010601261030457367,0.09498044947383294,-0.226694189810487,0.3712186802036801,-0.67803925364796347,2.1677834054403777],[0.011060465407887647,0.0013198345926718736,0.00027832770496465597,-0.0013657597607970046,0.0025911073470023119,-0.0036224009642652926,0.0059110663213108629,-0.018684516383628034]])
@@ -73,12 +74,14 @@ class traj_follow_ctrl:
         # Position control
         v_cmd = np.array([0.0,0.0,0.0])
         p_err = p_des - p_ref
+        vel = state.kinematics_estimated.linear_velocity
+        vel_vec = [vel.x_val, vel.y_val, vel.z_val]
         for i in range(3):
-            v_cmd[i] = v_des[i] + self.kp[i]*p_err[i] + self.ki[i]*self.p_err_i[i] + self.kd[i]*(p_err[i]-self.last_p_err[i])/self.sampletime
+            v_cmd[i] = (v_des[i]-vel_vec[i]) + self.kp[i]*p_err[i] + self.ki[i]*self.p_err_i[i] + self.kd[i]*(p_err[i]-self.last_p_err[i])/self.sampletime
         self.last_p_err = p_err
         self.p_err_i = self.p_err_i + self.last_p_err
         for i in range(3):
-            self.p_err_i[i] = max(self.p_err_i[i],1)
+            self.p_err_i[i] = max(self.p_err_i[i],0.2)
         # Yaw control
         yaw_rate_cmd = 0.0
         yaw_err = self.minAngleDiff(yaw_des, yaw_ref)

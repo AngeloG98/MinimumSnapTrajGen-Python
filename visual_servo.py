@@ -63,7 +63,7 @@ class airsim_client:
         self.th_R_min = 15
         self.th_R_max = 100
 
-        self.k_position = 1.0
+        self.k_position = 0.5
         self.k_yaw = 0.5
         self.v_position = 3
         self.v_through = 3
@@ -190,7 +190,7 @@ class airsim_client:
         # case1: (0.02, 3, 10)
         # case2: (0.04, 3, 12)
         v_m[0] = 5
-        v_m[1] = 6.5*v_b[1]
+        v_m[1] = 6.8*v_b[1]
         v_m[2] = 7*v_b[2]
 
         v = self.saturation(v_m, 10)
