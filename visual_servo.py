@@ -1,9 +1,13 @@
+from math import e
 import airsim
 import time
 import numpy as np
 import cv2
 import multiprocessing
 from trajfollow_ctrl import traj_follow_ctrl
+
+global passed_circle_list
+passed_circle_list = []
 
 def log_data(des, state):
     des_n = np.array(des)
@@ -54,7 +58,6 @@ class airsim_client:
         self.client = airsim.MultirotorClient(ip_addr)
         self.client.confirmConnection()
         self.client.enableApiControl(True)
-        self.traj = traj_follow_ctrl(self.client)
 
         self.new_task = True
         self.th_loss = 20
@@ -81,8 +84,8 @@ class airsim_client:
                           [19.8, -65.4, -3.7, np.deg2rad(-110)], [ 8.0, -82.2, -2.5, np.deg2rad(-120)],
                           [-11.3,-93.0, -2.9, np.deg2rad(-170)], [-29.9,-98.6, -4.7, np.deg2rad(-180)],
                           [-52.1,-103.0,-5.7, np.deg2rad(-180)]]
-
         self.setpoint_land = [-62.9, -102.3, -2]
+        self.traj = traj_follow_ctrl(self.client, self.setpoints, self.setpoint_land)
 
         self.circle_xyr = multiprocessing.Manager().list([-1, -1, -1])
         self.p = multiprocessing.Process(target=objectDetect, args=(self.circle_xyr, ))
@@ -164,14 +167,13 @@ class airsim_client:
     def moveByVisualServoOnceAsync(self, ex_i, ey_i, r_i):
         self.moveByVelocityYawrateBodyFrameAsync(self.v_through, self.k_ibvs_hor*ex_i, self.k_ibvs_ver*ey_i, 0)
 
-    def moveByRotateVisualServoOnceAsync(self, ex_i, ey_i, r_i):
+    def moveByRotateVisualServoOnceAsync(self, ex_i, ey_i, r_i, v_forward):
         #calacute nc,the first idex(c:camera,b:body,e:earth) represent the frmae, the second idex(c,o) represent the camera or obstacle
         quaternionr = self.client.getMultirotorState().kinematics_estimated.orientation
         q0, q1, q2, q3 = quaternionr.w_val, quaternionr.x_val, quaternionr.y_val, quaternionr.z_val
         self.R_be = np.array([[q0**2+q1**2-q2**2-q3**2, 2*(q1*q2-q0*q3), 2*(q1*q3+q0*q2)],
                       [2*(q1*q2+q0*q3), q0**2-q1**2+q2**2-q3**2, 2*(q2*q3-q0*q1)],
                       [2*(q1*q3-q0*q2), 2*(q2*q3+q0*q1), q0**2-q1**2-q2**2+q3**2]])
-
 
         n_bc = self.R_cb.dot(self.n_cc)
         n_ec = self.R_be.dot(n_bc)
@@ -192,13 +194,18 @@ class airsim_client:
         v_m[0] = 5
         v_m[1] = 6.8*v_b[1]
         v_m[2] = 7*v_b[2]
-
+        # v_m[1] = 8*v_b[1]
+        # v_m[2] = 7*v_b[2]
+        v_forward_body = self.R_be.T.dot(v_forward)
+        v_forward_body[0] = 0
+        # v = self.saturation(v_m, 10) -  v_forward_body*0.1
         v = self.saturation(v_m, 10)
         yaw_rate = 0.002*(ex_i)
         
         # print("v_b: {}\nv_m: {}\nv: {}".format(v_b, v_m, v))
         # print("yaw_rate: {}".format(yaw_rate))
         self.moveByVelocityYawrateBodyFrameAsync(*v, yaw_rate)
+        # self.moveByVelocityYawrateAsync(*v, yaw_rate)
 
     def saturation(self, a, maxv):
         n = np.linalg.norm(a)
@@ -232,15 +239,26 @@ class airsim_client:
             state = self.client.getMultirotorState()
             position = state.kinematics_estimated.position
             vel = state.kinematics_estimated.linear_velocity
-            print(np.linalg.norm([vel.x_val, vel.y_val, vel.z_val]))
+            acc = state.kinematics_estimated.linear_acceleration
+            # print(np.linalg.norm([vel.x_val, vel.y_val, vel.z_val]))
             p = np.array([position.x_val, position.y_val, position.z_val])
+            v = np.array([vel.x_val, vel.y_val, vel.z_val])
+            a = np.array([acc.x_val, acc.y_val, acc.z_val])
             dis = np.linalg.norm(np.array(self.setpoints[circle_id][:3]) - p)
             self.state_log.append(p)
             # print(p)
             # print(dis)
+            # Generate trajectory one time when use {moveByMinSnapSingleAsync}
+            # if  circle_id not in passed_circle_list:
+            #     passed_circle_list.append(circle_id)
+            #     p_init = p
+            #     v_init = v
+            #     a_init = a
+            #     self.traj.gen_traj_single(circle_id, p_init, v_init, a_init)
             # 新任务按照预设点飞行
             if self.new_task:
                 self.traj.moveByMinSnapAsync(circle_id)
+                # self.traj.moveByMinSnapSingleAsync(circle_id)
                 time.sleep(0.01)
             log_data(self.traj.des_log,self.state_log)
 
@@ -265,7 +283,7 @@ class airsim_client:
                 self.new_task = False
                 cnt_loss = 0
                 # self.moveByVisualServoOnceAsync(*self.circle_xyr)
-                self.moveByRotateVisualServoOnceAsync(*self.circle_xyr)
+                self.moveByRotateVisualServoOnceAsync(*self.circle_xyr, v)
                 time.sleep(0.01)
                 # print(circle_xyr)
             # 如果没找到目标，但是曾经找到过，而且丢失次数小于阈值，按照上次指令飞
@@ -282,8 +300,27 @@ class airsim_client:
             else:
                 pass
             #     # print("pass")
-            
-    
+
+    def task_follow_traj(self):
+        # time.sleep(1)
+        self.traj.reset()
+        while True:
+            state = self.client.getMultirotorState()
+            position = state.kinematics_estimated.position
+            vel = state.kinematics_estimated.linear_velocity
+            # print(np.linalg.norm([vel.x_val, vel.y_val, vel.z_val]))
+            p = np.array([position.x_val, position.y_val, position.z_val])
+            self.state_log.append(p)
+            # print(p)
+            # print(dis)
+            # 新任务按照预设点飞行            
+            if_go_on = self.traj.moveByMinSnapFullAsync()
+            time.sleep(0.01)
+            if if_go_on == True:
+                log_data(self.traj.des_log,self.state_log)
+            else:
+                break
+
     def task_land(self):
         self.moveToPosition(*self.setpoint_land, None, 10)
         self.client.armDisarm(False)
@@ -293,6 +330,7 @@ class airsim_client:
         print("=========================")
         print("Taking off...")
         self.task_takeoff()
+        time.sleep(0.5)
 
         for circle_id in range(len(self.setpoints)):
             # time.sleep(3)
@@ -300,6 +338,9 @@ class airsim_client:
             print("Now try to pass circle {}...".format(circle_id+1))
             self.task_cross_circle(circle_id)
         
+        # Follow a full minimum snap trajectory
+        # self.task_follow_traj()
+
         print("=========================")
         print("Landing...")
         self.task_land()
@@ -308,7 +349,6 @@ class airsim_client:
         print("Task is finished.")
 
 if __name__ == "__main__":
-    #git
     start_time = time.time()
     client = airsim_client('127.0.0.1')
     client.begin_task()
