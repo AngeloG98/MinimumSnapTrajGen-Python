@@ -1,4 +1,3 @@
-from os import error
 import numpy as np
 from numpy.core.fromnumeric import shape
 from scipy import sparse
@@ -8,35 +7,6 @@ import scipy.io as scio
 import osqp
 import matplotlib.pyplot as plt
 import time
-
-# def t_n_list(t,n_order):
-#     t_array_p = []
-#     for i in range(n_order+1):
-#             t_array_p.append(pow(t,i))
-#     return t_array_p
-
-# def plot_xy_traj(x_traj,y_traj,ref_x,ref_y):
-#     fig = plt.figure()
-#     plt.scatter(x_traj, y_traj,marker = 'x',color = 'blue', s = 2 ,label = 'state')
-#     plt.scatter(ref_x,ref_y,marker = 'x',color = 'red', s = 2 ,label = 'state')
-#     plt.show()
-
-# def gen_traj(Matrix_x,Matrix_y,time_set,n_order):
-#     p_x_traj = []
-#     p_y_traj = []
-#     k = 0
-#     i = 0
-#     for t in range(0,math.floor(time_set[-1]*100)+1):
-#         while True:
-#             if  t/100>=time_set[i] and  t/100<=time_set[i+1]:
-#                 break
-#             else:
-#                 k =k+1
-#                 i = i+1
-#                 break
-#         p_x_traj.append(np.dot(np.array(t_n_list(t/100,n_order)),Matrix_x[ : , k]))
-#         p_y_traj.append(np.dot(np.array(t_n_list(t/100,n_order)),Matrix_y[ : , k]))
-#     return p_x_traj,p_y_traj
 
 class MinSnap:
     def __init__(self) -> None:
@@ -144,32 +114,26 @@ class MinSnap:
         time_set.extend(time_i)
         return time_set
 
-def minimum_snap_traj(way_points):
+def minimum_snap_traj(way_points, total_time, n_order, n_obj):
     start_t = time.time()
     traj = MinSnap()
     # Reshape waypoints matrix
     way_points_n = np.array(way_points)[:,0:3]
-    # Manual adjustment 
-    way_points_n[1:-1,2] = way_points_n[1:-1,2] + np.ones((1,way_points_n.shape[0]-2))*1
-    way_points_n[-1,-1]  = way_points_n[-2,-1] 
     way_points_n = np.transpose(way_points_n)
     # Total time (s)
-    T = 40
-    # Poly order
-    n_order = 8
-    # Object order: 1-minimum vel 2-mimimum acc 3-minimum jerk 4-minimum snap
-    n_obj = 3
+    T = total_time
+    # n_order : Poly order
+    # n_obj : Object order: 1-minimum vel 2-mimimum acc 3-minimum jerk 4-minimum snap
     # Poly num
     n_poly = len(way_points) - 1
+    # Initial and end state
     v_i = [0,0,0,0]
     a_i = [0,0,0,0]
     v_e = [0,0,0,0]
     a_e = [0,0,0,0]
     # Arrange time roughly
     time_set = traj.time_arrange(way_points_n,T)
-    #  Adjust time manually
-    # for i in range(1,len(time_set)):
-    #     time_set[i] =  time_set[i] + 1
+    # Get Matrix
     p_x = traj.minsnap_trajectory_single_axis(way_points_n[0,:], time_set, n_order, n_obj, v_i[0], a_i[0], v_e[0], a_e[0])
     p_y = traj.minsnap_trajectory_single_axis(way_points_n[1,:], time_set, n_order, n_obj, v_i[1], a_i[1], v_e[1], a_e[1])
     p_z = traj.minsnap_trajectory_single_axis(way_points_n[2,:], time_set, n_order, n_obj, v_i[2], a_i[2], v_e[2], a_e[2])
@@ -180,50 +144,65 @@ def minimum_snap_traj(way_points):
     # print(end_t-start_t)
     return time_set, Matrix_x, Matrix_y, Matrix_z
 
-def minimum_snap_traj_p2p(traj, way_points, time_set, n_order, n_obj, v_i, a_i, v_e, a_e):
+def minimum_snap_traj_p2p(way_points, time_set, n_order, n_obj, v_i, a_i, v_e, a_e):
     start_t = time.time()
-    # Poly num
-    n_poly = way_points.shape[1] - 1
-    p_x = traj.minsnap_trajectory_single_axis(way_points[0,:], time_set, n_order, n_obj, v_i[0], a_i[0], v_e[0], a_e[0])
-    p_y = traj.minsnap_trajectory_single_axis(way_points[1,:], time_set, n_order, n_obj, v_i[1], a_i[1], v_e[1], a_e[1])
-    p_z = traj.minsnap_trajectory_single_axis(way_points[2,:], time_set, n_order, n_obj, v_i[2], a_i[2], v_e[2], a_e[2])
+    traj = MinSnap()
+    way_points_n = np.array(way_points)[:,0:3]
+    way_points_n = np.transpose(way_points_n)
+    # Poly num == 1
+    n_poly = len(way_points) - 1
+    p_x = traj.minsnap_trajectory_single_axis(way_points_n[0,:], time_set, n_order, n_obj, v_i[0], a_i[0], v_e[0], a_e[0])
+    p_y = traj.minsnap_trajectory_single_axis(way_points_n[1,:], time_set, n_order, n_obj, v_i[1], a_i[1], v_e[1], a_e[1])
+    p_z = traj.minsnap_trajectory_single_axis(way_points_n[2,:], time_set, n_order, n_obj, v_i[2], a_i[2], v_e[2], a_e[2])
     Matrix_x = np.transpose(p_x.reshape(n_poly,n_order+1))
     Matrix_y = np.transpose(p_y.reshape(n_poly,n_order+1))
     Matrix_z = np.transpose(p_z.reshape(n_poly,n_order+1))
     end_t = time.time()
-    print(end_t-start_t)
+    # print(end_t-start_t)
     return Matrix_x, Matrix_y, Matrix_z
 
-def mimimum_snap_traj_p2p_id(way_points, point_id, p_i, v_i, a_i):
-    traj = MinSnap()
-    # Reshape waypoints matrix
-    way_points_n = np.array(way_points)[:,0:3]
-    # Manual adjustment 
-    way_points_n[1:-1,2] = way_points_n[1:-1,2] + np.ones((1,way_points_n.shape[0]-2))*1
-    way_points_n[-1,-1]  = way_points_n[-2,-1] # land point Z set equ to last circle
-    way_points_n[1,1]  = way_points_n[1,1] + 10# first circle Y forward
-    way_points_n = np.transpose(way_points_n)
-    # Total time (s)
-    T = 40
-    # Poly order
-    n_order = 6
-    # Object order: 1-minimum vel 2-mimimum acc 3-minimum jerk 4-minimum snap
-    n_obj = 3
-    # Set end speed 
-    speed = 4
-    v_e = []
-    a_e = []
-    for i in range(len(way_points)):
-        v_e.append([speed*np.cos(way_points[i][3]), speed*np.sin(way_points[i][3]), 0, 0])
-        a_e.append([0, 0, 0, 0])
-    # Arrange time roughly
-    time_set = traj.time_arrange(way_points_n,T)
-    #  Adjust time manually
-    # for i in range(1,len(time_set)):
-    #     time_set[i] =  time_set[i] + 1
-    p2p = np.zeros((3,2))
-    p2p[:,0] = p_i
-    p2p[:,1] = way_points_n[:,point_id+1]
-    time_p2p = np.array(time_set[point_id:point_id+2])-np.array([time_set[point_id], time_set[point_id]])
-    return minimum_snap_traj_p2p(traj, p2p, time_p2p, \
-                                                                        n_order, n_obj, v_i, a_i, v_e[point_id+1], a_e[point_id+1])
+
+def get_traj(Matrix_x, Matrix_y, Matrix_z, time_set, sample_rate):
+    # Init
+    p = [[],[],[]]
+    v = [[],[],[]]
+    a = [[],[],[]]
+    n = Matrix_x.shape[0] - 1
+    # Get sample time list
+    sample_list = []
+    for t_sample in range(math.floor(time_set[-1]*sample_rate+1)):
+        sample_list.append(t_sample/sample_rate)
+    # Get p v a list
+    for i in range(1,len(sample_list)):
+        # Get id
+        t = sample_list[i]
+        id = 0
+        for i in range(len(time_set)-1):
+            if  t >= time_set[i] and t < time_set[i+1]:
+                id = i
+                break
+            else:
+                pass
+        # Get t vector
+        t_array_p = []
+        t_array_v = []
+        t_array_a = []
+        for i in range(n+1):
+            t_array_p.append(pow(t,i))
+            t_array_v.append((i*pow(t,i-1)))
+            t_array_a.append((i*(i-1)*pow(t,i-2)))
+        # Get desire states
+        p[0].append(np.dot(np.array(t_array_p),Matrix_x[ : , id]))
+        p[1].append(np.dot(np.array(t_array_p),Matrix_y[ : , id]))
+        p[2].append(np.dot(np.array(t_array_p),Matrix_z[ : , id]))
+        v[0].append(np.dot(np.array(t_array_v),Matrix_x[ : , id]))
+        v[1].append(np.dot(np.array(t_array_v),Matrix_y[ : , id]))
+        v[2].append(np.dot(np.array(t_array_v),Matrix_z[ : , id]))
+        a[0].append(np.dot(np.array(t_array_a),Matrix_x[ : , id]))
+        a[1].append(np.dot(np.array(t_array_a),Matrix_y[ : , id]))
+        a[2].append(np.dot(np.array(t_array_a),Matrix_z[ : , id]))
+    return p, v, a, sample_list
+
+
+
+
